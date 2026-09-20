@@ -72,6 +72,10 @@ public class Database {
                     "encontros INTEGER NOT NULL, " +
                     "emitidoEm TEXT NOT NULL)");
 
+            stmt.execute("CREATE TABLE IF NOT EXISTS desbloqueios (" +
+                    "participanteId TEXT NOT NULL, " +
+                    "desbloqueadoEm TEXT NOT NULL)");
+
             resetInitialData();
         } catch (SQLException e) {
             throw new RuntimeException("Erro ao inicializar banco de dados", e);
@@ -89,6 +93,7 @@ public class Database {
             stmt.execute("DELETE FROM inscricoes");
             stmt.execute("DELETE FROM presencas");
             stmt.execute("DELETE FROM certificados");
+            stmt.execute("DELETE FROM desbloqueios");
 
             String[][] usuarios = {
                 {"org-ana", "Ana Beatriz Lima", "organizacao"},

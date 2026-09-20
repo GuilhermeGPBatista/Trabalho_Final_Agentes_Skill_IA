@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Semana Acadêmica - Painel da Organização (M5)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Painel da Organização</h1>
+      <nav>
+        <a href="index.html">Programação</a>
+        <a href="inscricoes.html">Minhas Inscrições</a>
+        <a href="nova-atividade.html">Nova Atividade</a>
+        <a href="presencas.html">Presença QR</a>
+        <a href="certificados.html">Certificados</a>
+        <a href="painel.html" style="font-weight: bold; color: var(--primary);">Painel (M5)</a>
+      </nav>
+    </header>
+
+    <div id="user-selector-container"></div>
+    <div id="alert-box" class="alert"></div>
+
+    <!-- Seção 1: Ocupação e Frequência das Atividades -->
+    <div class="card" style="margin-bottom: 20px;">
+      <h2>Métricas das Atividades</h2>
+      <p style="color: var(--text-muted); margin-bottom: 15px; font-size: 14px;">
+        Taxa de ocupação e frequência média dos encontros encerrados.
+      </p>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Título</th>
+              <th>Vagas</th>
+              <th>Ocupadas</th>
+              <th>Em Espera</th>
+              <th>Ocupação (%)</th>
+              <th>Frequência (%)</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-painel-atividades">
+            <tr>
+              <td colspan="7" style="text-align: center; color: var(--text-muted);">Carregando métricas...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Seção 2: Participantes "Sem Chance" por Atividade -->
+    <div class="card" style="margin-bottom: 20px;">
+      <h2>Participantes "Sem Chance"</h2>
+      <p style="color: var(--text-muted); margin-bottom: 15px; font-size: 14px;">
+        Participantes confirmados que já ultrapassaram o limite de faltas para o certificado.
+      </p>
+      <div class="filters" style="margin-bottom: 15px;">
+        <div class="filter-group">
+          <label for="select-atividade-sem-chance">Selecione a Atividade:</label>
+          <select id="select-atividade-sem-chance">
+            <option value="">Carregando atividades...</option>
+          </select>
+        </div>
+      </div>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Participante ID</th>
+              <th>Nome</th>
+              <th>Faltas</th>
+              <th>Faltas Permitidas</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-sem-chance">
+            <tr>
+              <td colspan="4" style="text-align: center; color: var(--text-muted);">Selecione uma atividade acima.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Seção 3: Exportação CSV -->
+    <div class="card" style="margin-bottom: 20px;">
+      <h2>Exportar Planilha de Frequência (CSV)</h2>
+      <p style="color: var(--text-muted); margin-bottom: 15px; font-size: 14px;">
+        Baixe o relatório detalhado de presença, frequência e elegibilidade a certificado por participante.
+      </p>
+      <div class="filters">
+        <div class="filter-group">
+          <label for="select-atividade-csv">Selecione a Atividade:</label>
+          <select id="select-atividade-csv">
+            <option value="">Carregando atividades...</option>
+          </select>
+        </div>
+        <div class="filter-group" style="justify-content: flex-end;">
+          <button id="btn-baixar-csv" type="button" style="margin-top: auto;">Baixar CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Seção 4: Gestão de Bloqueios -->
+    <div class="card">
+      <h2>Participantes Bloqueados</h2>
+      <p style="color: var(--text-muted); margin-bottom: 15px; font-size: 14px;">
+        Participantes bloqueados por zero presença em 2 atividades encerradas.
+      </p>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Participante ID</th>
+              <th>Nome</th>
+              <th>Atividades Motivadoras</th>
+              <th>Bloqueado Desde</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-bloqueios">
+            <tr>
+              <td colspan="5" style="text-align: center; color: var(--text-muted);">Carregando bloqueios...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="painel.js"></script>
+</body>
+</html>

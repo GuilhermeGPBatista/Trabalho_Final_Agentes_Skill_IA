@@ -135,7 +135,7 @@ function exportar() {
     const destino = path.join(pasta, `${item.id}.json`);
     if (lerJson(destino)?.info?.time?.updated === item.updated) continue;
     console.log(`exportando ${item.id}  ${item.title}`);
-    const sessao = compactar(extrairJson(executar('opencode', ['session', 'export', item.id]), '{', '}'));
+    const sessao = compactar(extrairJson(executar('opencode', ['export', item.id]), '{', '}'));
     fs.writeFileSync(destino, JSON.stringify(sessao, null, 1));
     exportadas++;
   }

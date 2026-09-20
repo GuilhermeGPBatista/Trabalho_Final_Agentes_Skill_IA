@@ -1027,6 +1027,375 @@ public class Main {
             }
         });
 
+        app.get("/painel/atividades", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização"));
+                return;
+            }
+
+            List<Map<String, Object>> painel = new ArrayList<>();
+            try (Connection conn = Database.getConnection();
+                 Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT id, titulo, vagas FROM atividades")) {
+                while (rs.next()) {
+                    String atvId = rs.getString("id");
+                    String titulo = rs.getString("titulo");
+                    int vagas = rs.getInt("vagas");
+
+                    int ocupadas = 0;
+                    int emEspera = 0;
+                    try (PreparedStatement psIns = conn.prepareStatement("SELECT status, count(*) FROM inscricoes WHERE atividadeId = ? GROUP BY status")) {
+                        psIns.setString(1, atvId);
+                        ResultSet rsIns = psIns.executeQuery();
+                        while (rsIns.next()) {
+                            String st = rsIns.getString(1);
+                            int count = rsIns.getInt(2);
+                            if ("confirmada".equals(st) || "convocada".equals(st)) {
+                                ocupadas += count;
+                            } else if ("em_espera".equals(st)) {
+                                emEspera += count;
+                            }
+                        }
+                    }
+
+                    double ocupacaoPercentual = 0.0;
+                    if (vagas > 0) {
+                        ocupacaoPercentual = java.math.BigDecimal.valueOf(ocupadas)
+                                .divide(java.math.BigDecimal.valueOf(vagas), 4, java.math.RoundingMode.HALF_UP)
+                                .multiply(java.math.BigDecimal.valueOf(100))
+                                .setScale(1, java.math.RoundingMode.HALF_UP)
+                                .doubleValue();
+                    }
+
+                    List<String> encontroIds = new ArrayList<>();
+                    List<String> fimEncontros = new ArrayList<>();
+                    try (PreparedStatement psEnc = conn.prepareStatement("SELECT id, fim FROM encontros WHERE atividadeId = ? ORDER BY inicio ASC")) {
+                        psEnc.setString(1, atvId);
+                        ResultSet rsEnc = psEnc.executeQuery();
+                        while (rsEnc.next()) {
+                            encontroIds.add(rsEnc.getString("id"));
+                            fimEncontros.add(rsEnc.getString("fim"));
+                        }
+                    }
+
+                    int confirmadasCount = 0;
+                    try (PreparedStatement psConf = conn.prepareStatement("SELECT count(*) FROM inscricoes WHERE atividadeId = ? AND status = 'confirmada'")) {
+                        psConf.setString(1, atvId);
+                        ResultSet rsConf = psConf.executeQuery();
+                        if (rsConf.next()) {
+                            confirmadasCount = rsConf.getInt(1);
+                        }
+                    }
+
+                    OffsetDateTime agora = Database.getClock();
+                    List<Double> frequenciasEncontros = new ArrayList<>();
+                    for (int i = 0; i < encontroIds.size(); i++) {
+                        String encId = encontroIds.get(i);
+                        String fimStr = fimEncontros.get(i);
+                        if (fimStr != null) {
+                            OffsetDateTime fim = OffsetDateTime.parse(fimStr);
+                            if (!agora.isBefore(fim)) {
+                                int presencasCount = 0;
+                                try (PreparedStatement psPres = conn.prepareStatement(
+                                    "SELECT count(DISTINCT p.participanteId) FROM presencas p JOIN inscricoes i ON i.participanteId = p.participanteId WHERE p.encontroId = ? AND i.atividadeId = ? AND i.status = 'confirmada'"
+                                )) {
+                                    psPres.setString(1, encId);
+                                    psPres.setString(2, atvId);
+                                    ResultSet rsPres = psPres.executeQuery();
+                                    if (rsPres.next()) {
+                                        presencasCount = rsPres.getInt(1);
+                                    }
+                                }
+                                double freq = 0.0;
+                                if (confirmadasCount > 0) {
+                                    freq = ((double) presencasCount / confirmadasCount) * 100.0;
+                                }
+                                frequenciasEncontros.add(freq);
+                            }
+                        }
+                    }
+
+                    Double frequenciaPercentual = null;
+                    if (!frequenciasEncontros.isEmpty()) {
+                        double soma = 0.0;
+                        for (double f : frequenciasEncontros) {
+                            soma += f;
+                        }
+                        frequenciaPercentual = java.math.BigDecimal.valueOf(soma)
+                                .divide(java.math.BigDecimal.valueOf(frequenciasEncontros.size()), 4, java.math.RoundingMode.HALF_UP)
+                                .setScale(1, java.math.RoundingMode.HALF_UP)
+                                .doubleValue();
+                    }
+
+                    Map<String, Object> linha = new HashMap<>();
+                    linha.put("atividadeId", atvId);
+                    linha.put("titulo", titulo);
+                    linha.put("vagas", vagas);
+                    linha.put("ocupadas", ocupadas);
+                    linha.put("emEspera", emEspera);
+                    linha.put("ocupacaoPercentual", ocupacaoPercentual);
+                    linha.put("frequenciaPercentual", frequenciaPercentual);
+                    painel.add(linha);
+                }
+            } catch (SQLException e) {
+                ctx.status(500);
+            }
+
+            ctx.json(painel);
+        });
+
+        app.get("/painel/atividades/{id}/sem-chance", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização"));
+                return;
+            }
+
+            String atividadeId = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psAtv = conn.prepareStatement("SELECT id FROM atividades WHERE id = ?");
+                psAtv.setString(1, atividadeId);
+                ResultSet rsAtv = psAtv.executeQuery();
+                if (!rsAtv.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Atividade não encontrada"));
+                    return;
+                }
+
+                List<String> vencidoEncontroIds = new ArrayList<>();
+                OffsetDateTime agora = Database.getClock();
+                PreparedStatement psEnc = conn.prepareStatement("SELECT id, fim FROM encontros WHERE atividadeId = ? ORDER BY inicio ASC");
+                psEnc.setString(1, atividadeId);
+                ResultSet rsEnc = psEnc.executeQuery();
+                while (rsEnc.next()) {
+                    String encId = rsEnc.getString("id");
+                    String fimStr = rsEnc.getString("fim");
+                    if (fimStr != null) {
+                        OffsetDateTime fim = OffsetDateTime.parse(fimStr);
+                        OffsetDateTime deadline = fim.plusHours(2);
+                        if (!agora.isBefore(deadline)) {
+                            vencidoEncontroIds.add(encId);
+                        }
+                    }
+                }
+
+                int N = vencidoEncontroIds.size();
+                int faltasPermitidas = N / 4;
+
+                List<Map<String, Object>> semChanceList = new ArrayList<>();
+                PreparedStatement psPart = conn.prepareStatement("SELECT u.id, u.nome FROM inscricoes i JOIN usuarios u ON u.id = i.participanteId WHERE i.atividadeId = ? AND i.status = 'confirmada' ORDER BY u.nome ASC");
+                psPart.setString(1, atividadeId);
+                ResultSet rsPart = psPart.executeQuery();
+                while (rsPart.next()) {
+                    String partId = rsPart.getString("id");
+                    String partNome = rsPart.getString("nome");
+
+                    int faltas = 0;
+                    if (N > 0) {
+                        for (String encId : vencidoEncontroIds) {
+                            PreparedStatement psPres = conn.prepareStatement("SELECT 1 FROM presencas WHERE encontroId = ? AND participanteId = ?");
+                            psPres.setString(1, encId);
+                            psPres.setString(2, partId);
+                            ResultSet rsPres = psPres.executeQuery();
+                            boolean hasPresenca = rsPres.next();
+                            rsPres.close();
+                            psPres.close();
+                            if (!hasPresenca) {
+                                faltas++;
+                            }
+                        }
+                    }
+
+                    if (N > 0 && faltas > faltasPermitidas) {
+                        Map<String, Object> sc = new HashMap<>();
+                        sc.put("participanteId", partId);
+                        sc.put("nome", partNome);
+                        sc.put("faltas", faltas);
+                        sc.put("faltasPermitidas", faltasPermitidas);
+                        semChanceList.add(sc);
+                    }
+                }
+
+                ctx.json(semChanceList);
+            } catch (SQLException e) {
+                ctx.status(500);
+            }
+        });
+
+        app.get("/painel/atividades/{id}/frequencia.csv", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização"));
+                return;
+            }
+
+            String atividadeId = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psAtv = conn.prepareStatement("SELECT id FROM atividades WHERE id = ?");
+                psAtv.setString(1, atividadeId);
+                ResultSet rsAtv = psAtv.executeQuery();
+                if (!rsAtv.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Atividade não encontrada"));
+                    return;
+                }
+
+                List<String> encontroIds = new ArrayList<>();
+                List<OffsetDateTime> encontroFins = new ArrayList<>();
+                PreparedStatement psEnc = conn.prepareStatement("SELECT id, fim FROM encontros WHERE atividadeId = ? ORDER BY inicio ASC");
+                psEnc.setString(1, atividadeId);
+                ResultSet rsEnc = psEnc.executeQuery();
+                while (rsEnc.next()) {
+                    encontroIds.add(rsEnc.getString("id"));
+                    encontroFins.add(OffsetDateTime.parse(rsEnc.getString("fim")));
+                }
+
+                int totalEncontros = encontroIds.size();
+                OffsetDateTime agora = Database.getClock();
+
+                StringBuilder sb = new StringBuilder();
+                sb.append("\uFEFF");
+                sb.append("nome");
+                for (int i = 1; i <= totalEncontros; i++) {
+                    sb.append(";E").append(i);
+                }
+                sb.append(";frequencia;certificado\n");
+
+                PreparedStatement psPart = conn.prepareStatement("SELECT u.id, u.nome FROM inscricoes i JOIN usuarios u ON u.id = i.participanteId WHERE i.atividadeId = ? AND i.status = 'confirmada' ORDER BY u.nome ASC");
+                psPart.setString(1, atividadeId);
+                ResultSet rsPart = psPart.executeQuery();
+                while (rsPart.next()) {
+                    String partId = rsPart.getString("id");
+                    String partNome = rsPart.getString("nome");
+
+                    sb.append(partNome);
+
+                    int presencasTotal = 0;
+                    for (int i = 0; i < totalEncontros; i++) {
+                        String encId = encontroIds.get(i);
+                        OffsetDateTime fim = encontroFins.get(i);
+
+                        PreparedStatement psPres = conn.prepareStatement("SELECT 1 FROM presencas WHERE encontroId = ? AND participanteId = ?");
+                        psPres.setString(1, encId);
+                        psPres.setString(2, partId);
+                        ResultSet rsPres = psPres.executeQuery();
+                        boolean hasPresenca = rsPres.next();
+                        rsPres.close();
+                        psPres.close();
+
+                        if (hasPresenca) {
+                            sb.append(";P");
+                            presencasTotal++;
+                        } else {
+                            OffsetDateTime deadline = fim.plusHours(2);
+                            if (agora.isAfter(deadline) || agora.equals(deadline)) {
+                                sb.append(";F");
+                            } else {
+                                sb.append(";-");
+                            }
+                        }
+                    }
+
+                    double freq = totalEncontros > 0 ? ((double) presencasTotal / totalEncontros) * 1.0 : 0.0;
+                    String freqStr = String.format(java.util.Locale.GERMAN, "%.1f", freq);
+                    sb.append(";").append(freqStr);
+
+                    PreparedStatement psCert = conn.prepareStatement("SELECT 1 FROM certificados WHERE atividadeId = ? AND participanteId = ?");
+                    psCert.setString(1, atividadeId);
+                    psCert.setString(2, partId);
+                    ResultSet rsCert = psCert.executeQuery();
+                    boolean hasCert = rsCert.next();
+                    rsCert.close();
+                    psCert.close();
+
+                    sb.append(";").append(hasCert ? "sim" : "nao").append("\n");
+                }
+
+                ctx.contentType("text/csv; charset=UTF-8");
+                ctx.result(sb.toString());
+            } catch (SQLException e) {
+                ctx.status(500);
+            }
+        });
+
+        app.get("/painel/bloqueios", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização"));
+                return;
+            }
+
+            List<Map<String, Object>> bloqueios = new ArrayList<>();
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psPart = conn.prepareStatement("SELECT id, nome FROM usuarios WHERE papel = 'participante' ORDER BY nome ASC");
+                ResultSet rsPart = psPart.executeQuery();
+                while (rsPart.next()) {
+                    String partId = rsPart.getString("id");
+                    String partNome = rsPart.getString("nome");
+                    Map<String, Object> b = getBloqueioInfo(conn, partId, partNome);
+                    if (b != null) {
+                        bloqueios.add(b);
+                    }
+                }
+                rsPart.close();
+                psPart.close();
+            } catch (SQLException e) {
+                ctx.status(500);
+            }
+            ctx.json(bloqueios);
+        });
+
+        app.delete("/painel/bloqueios/{participanteId}", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização"));
+                return;
+            }
+
+            String participanteId = ctx.pathParam("participanteId");
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psUser = conn.prepareStatement("SELECT nome FROM usuarios WHERE id = ? AND papel = 'participante'");
+                psUser.setString(1, participanteId);
+                ResultSet rsUser = psUser.executeQuery();
+                if (!rsUser.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Participante não encontrado"));
+                    return;
+                }
+                String nome = rsUser.getString("nome");
+                rsUser.close();
+                psUser.close();
+
+                Map<String, Object> b = getBloqueioInfo(conn, participanteId, nome);
+                if (b == null) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Participante não está bloqueado"));
+                    return;
+                }
+
+                PreparedStatement psIns = conn.prepareStatement("INSERT INTO desbloqueios(participanteId, desbloqueadoEm) VALUES(?, ?)");
+                psIns.setString(1, participanteId);
+                psIns.setString(2, Database.getClock().toString());
+                psIns.executeUpdate();
+                psIns.close();
+
+                ctx.status(204);
+            } catch (SQLException e) {
+                ctx.status(500);
+            }
+        });
+
         app.post("/atividades/{id}/inscricoes", ctx -> {
             String xUsuario = ctx.header("X-Usuario");
             String role = Database.getUserRole(xUsuario);
@@ -1038,6 +1407,11 @@ public class Main {
 
             String atividadeId = ctx.pathParam("id");
             try (Connection conn = Database.getConnection()) {
+                if (isParticipanteBloqueado(conn, xUsuario)) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "INSCRICAO_BLOQUEADA", "mensagem", "Participante bloqueado"));
+                    return;
+                }
                 Map<String, Object> atv = buildAtividade(conn, atividadeId);
                 if (atv == null) {
                     ctx.status(404);
@@ -1729,5 +2103,83 @@ public class Main {
         rs.close();
         ps.close();
         return dt;
+    }
+
+    public static Map<String, Object> getBloqueioInfo(Connection conn, String participanteId, String nome) {
+        try {
+            OffsetDateTime unblockTime = null;
+            PreparedStatement psUnblock = conn.prepareStatement("SELECT MAX(desbloqueadoEm) FROM desbloqueios WHERE participanteId = ?");
+            psUnblock.setString(1, participanteId);
+            ResultSet rsUnblock = psUnblock.executeQuery();
+            if (rsUnblock.next() && rsUnblock.getString(1) != null) {
+                unblockTime = OffsetDateTime.parse(rsUnblock.getString(1));
+            }
+            rsUnblock.close();
+            psUnblock.close();
+
+            PreparedStatement psAtv = conn.prepareStatement(
+                "SELECT DISTINCT a.id FROM atividades a JOIN inscricoes i ON i.atividadeId = a.id WHERE i.participanteId = ? AND i.status = 'confirmada' AND a.cancelada = 0"
+            );
+            psAtv.setString(1, participanteId);
+            ResultSet rsAtv = psAtv.executeQuery();
+            List<String> atividadesZeroPresenca = new ArrayList<>();
+            OffsetDateTime ultimaFimZeroPresenca = null;
+            OffsetDateTime agora = Database.getClock();
+
+            while (rsAtv.next()) {
+                String atvId = rsAtv.getString("id");
+                List<OffsetDateTime> fimEncontros = new ArrayList<>();
+                PreparedStatement psEnc = conn.prepareStatement("SELECT fim FROM encontros WHERE atividadeId = ? ORDER BY inicio ASC");
+                psEnc.setString(1, atvId);
+                ResultSet rsEnc = psEnc.executeQuery();
+                while (rsEnc.next()) {
+                    fimEncontros.add(OffsetDateTime.parse(rsEnc.getString("fim")));
+                }
+                rsEnc.close();
+                psEnc.close();
+
+                if (fimEncontros.isEmpty()) continue;
+                OffsetDateTime ultimoFim = fimEncontros.get(fimEncontros.size() - 1);
+
+                if (agora.isBefore(ultimoFim)) continue;
+                if (unblockTime != null && !ultimoFim.isAfter(unblockTime)) continue;
+
+                boolean hasPresence = false;
+                PreparedStatement psPres = conn.prepareStatement(
+                    "SELECT 1 FROM presencas p JOIN encontros e ON e.id = p.encontroId WHERE e.atividadeId = ? AND p.participanteId = ?"
+                );
+                psPres.setString(1, atvId);
+                psPres.setString(2, participanteId);
+                ResultSet rsPres = psPres.executeQuery();
+                if (rsPres.next()) {
+                    hasPresence = true;
+                }
+                rsPres.close();
+                psPres.close();
+
+                if (!hasPresence) {
+                    atividadesZeroPresenca.add(atvId);
+                    if (ultimaFimZeroPresenca == null || ultimoFim.isAfter(ultimaFimZeroPresenca)) {
+                        ultimaFimZeroPresenca = ultimoFim;
+                    }
+                }
+            }
+            rsAtv.close();
+            psAtv.close();
+
+            if (atividadesZeroPresenca.size() >= 2) {
+                Map<String, Object> bloqueio = new HashMap<>();
+                bloqueio.put("participanteId", participanteId);
+                bloqueio.put("nome", nome);
+                bloqueio.put("atividades", atividadesZeroPresenca);
+                bloqueio.put("bloqueadoDesde", ultimaFimZeroPresenca != null ? ultimaFimZeroPresenca.toString() : agora.toString());
+                return bloqueio;
+            }
+        } catch (SQLException e) {}
+        return null;
+    }
+
+    public static boolean isParticipanteBloqueado(Connection conn, String participanteId) {
+        return getBloqueioInfo(conn, participanteId, "") != null;
     }
 }

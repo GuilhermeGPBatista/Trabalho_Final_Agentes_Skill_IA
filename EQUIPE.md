@@ -8,3 +8,4 @@ Cada integrante é dono de um módulo inteiro: entrevista, spec, testes, API, te
 | M2 — Inscrições e lista de espera   | Gustavo Mareti               | GustavoMMFigaro   |
 | M3 — Presença por QR                | Davi Rodrigues Fraile Veiga  | DaviRodriFv       |
 | M4 — Certificados (grupos de 4 e 5) | Vitor Soster Felix           | VitorsosterFF     |
+| M5 — Painel da organização          | Guilherme Giovanne Pereira Batista | GuilhermeGPBatista |
